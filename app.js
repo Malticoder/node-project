@@ -1,0 +1,67 @@
+const express = require("express");
+const mongoose = require("mongoose");
+const redis = require("redis");
+
+const app = express();
+app.use(express.json());
+
+const PORT = process.env.PORT || 8090;
+const MONGO_URI = process.env.MONGO_URI;
+const REDIS_HOST = process.env.REDIS_HOST;
+const REDIS_PORT = process.env.REDIS_PORT;
+
+// MongoDB connection
+mongoose.connect(MONGO_URI)
+.then(() => console.log("MongoDB connected"))
+.catch(err => console.log(err));
+
+// Redis connection
+const redisClient = redis.createClient({
+    socket: {
+        host: REDIS_HOST,
+        port: REDIS_PORT
+    }
+});
+
+redisClient.connect();
+
+// Mongo Schema
+const Item = mongoose.model("Item", {
+    name: String
+});
+
+// Health endpoint
+app.get("/", (req, res) => {
+    res.send("Node.js Docker App Running");
+});
+
+// Insert data
+app.post("/data", async (req, res) => {
+
+    const { name } = req.body;
+
+    const item = new Item({ name });
+    await item.save();
+
+    await redisClient.set("latest", name);
+
+    res.send("Data saved successfully");
+});
+
+// Fetch data
+app.get("/data", async (req, res) => {
+
+    const cached = await redisClient.get("latest");
+
+    if (cached) {
+        return res.json({ source: "redis", data: cached });
+    }
+
+    const data = await Item.find();
+
+    res.json({ source: "mongodb", data });
+});
+
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+});
